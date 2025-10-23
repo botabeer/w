@@ -1,25 +1,28 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
-import json, os
+from linebot.models import (
+    MessageEvent, TextMessage, TextSendMessage, TemplateSendMessage,
+    ButtonsTemplate, PostbackAction
+)
+import os, json, random
 
 app = Flask(__name__)
 
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
+
+if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
+    raise RuntimeError("Set LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET")
+
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# تحميل الأمثال
-with open("proverbs.json", "r", encoding="utf-8") as f:
-    proverbs = json.load(f)
-
-# تحميل الألغاز
+# تحميل الألغاز من ملف خارجي
 with open("riddles.json", "r", encoding="utf-8") as f:
     riddles = json.load(f)
 
-# حفظ حالة المستخدم (مؤقت)
+# حفظ حالة كل مستخدم (رقم اللغز الحالي)
 user_state = {}
 
 @app.route("/callback", methods=["POST"])
@@ -32,73 +35,69 @@ def callback():
         abort(400)
     return "OK"
 
+def create_riddle_message(user_id):
+    idx = user_state.get(user_id, 0)
+    riddle = riddles[idx]
+    text = f"🧩 {riddle['لغز']}"
+    buttons = [
+        PostbackAction(label="💡 تلميح/إجابة", data=f"hint_{idx}"),
+        PostbackAction(label="⬅️ السابق", data="prev"),
+        PostbackAction(label="➡️ التالي", data="next")
+    ]
+    return TemplateSendMessage(
+        alt_text="لغز", 
+        template=ButtonsTemplate(title="لغز اليوم", text=text, actions=buttons)
+    )
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
-    text = event.message.text.strip()
+    text = event.message.text.strip().lower()
+    
+    if text in ["لغز", "riddle"]:
+        user_state[user_id] = 0
+        message = create_riddle_message(user_id)
+        line_bot_api.reply_message(event.reply_token, message)
+    
+    elif text == "مساعدة":
+        help_text = (
+            "🛠️ أوامر البوت:\n"
+            "• 'لغز' : يعطيك لغز جديد.\n"
+            "• أزرار اللغز:\n"
+            "  💡 : يظهر التلميح أولاً، وإذا ضغط مرة ثانية يظهر الإجابة.\n"
+            "  ⬅️ : لغز السابق\n"
+            "  ➡️ : اللغز التالي\n"
+            "• 'مساعدة' : يوضح هذه الرسالة."
+        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=help_text))
 
-    # أمر مساعدة
-    if text == "مساعدة":
-        help_bubble = {
-            "type": "bubble",
-            "header": {"type": "box", "layout": "vertical", "contents":[
-                {"type":"text","text":"📜 أوامر البوت","weight":"bold","size":"lg"}
-            ]},
-            "body": {"type":"box","layout":"vertical","contents":[
-                {"type":"text","text":"أمثلة → عرض الأمثال"},
-                {"type":"text","text":"لغز → عرض لغز"},
-                {"type":"text","text":"💡 → يظهر التلميح أولاً، وإذا ضغط مرة ثانية يظهر الإجابة"},
-                {"type":"text","text":"⬅️ → السابق"},
-                {"type":"text","text":"➡️ → التالي"}
-            ]}
-        }
-        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="مساعدة", contents=help_bubble))
+@handler.add(MessageEvent, message=TextMessage)
+def handle_postback(event):
+    if not hasattr(event.message, "text"):
         return
+    user_id = event.source.user_id
+    data = event.message.text
 
-    # بدء أمثال
-    if text == "أمثلة":
-        user_state[user_id] = {"type": "proverb", "index": 0}
-        proverb = proverbs[0]["text"]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(proverb))
-        return
+    idx = user_state.get(user_id, 0)
 
-    # بدء ألغاز
-    if text == "لغز":
-        user_state[user_id] = {"type": "riddle", "index": 0, "show_hint": False}
-        r = riddles[0]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(f"🔹 {r['question']}"))
-        return
+    if data.startswith("hint_"):
+        hint_idx = int(data.split("_")[1])
+        riddle = riddles[hint_idx]
+        reply = f"💡 تلميح: {riddle.get('تلميح','لا يوجد')} \n🔑 إجابة: {riddle.get('الإجابة','...')}"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
-    # زر 💡
-    if text == "💡" and user_id in user_state:
-        state = user_state[user_id]
-        if state["type"] == "riddle":
-            idx = state["index"]
-            r = riddles[idx]
-            if not state.get("show_hint"):
-                state["show_hint"] = True
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(f"💡 تلميح: {r['hint']}"))
-            else:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(f"✅ الإجابة: {r['answer']}"))
-        return
+    elif data == "next":
+        idx = (idx + 1) % len(riddles)
+        user_state[user_id] = idx
+        message = create_riddle_message(user_id)
+        line_bot_api.reply_message(event.reply_token, message)
 
-    # التنقل ⬅️ ➡️
-    if text in ["⬅️", "➡️"] and user_id in user_state:
-        state = user_state[user_id]
-        idx = state["index"]
-        data_list = proverbs if state["type"] == "proverb" else riddles
-        if text == "⬅️":
-            idx = (idx - 1) % len(data_list)
-        else:
-            idx = (idx + 1) % len(data_list)
-        state["index"] = idx
-        state["show_hint"] = False
-        content = data_list[idx]["text"] if state["type"] == "proverb" else data_list[idx]["question"]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(content))
-        return
-
-    # أي رسالة أخرى
-    line_bot_api.reply_message(event.reply_token, TextSendMessage("اكتب 'مساعدة' لرؤية الأوامر"))
+    elif data == "prev":
+        idx = (idx - 1) % len(riddles)
+        user_state[user_id] = idx
+        message = create_riddle_message(user_id)
+        line_bot_api.reply_message(event.reply_token, message)
 
 if __name__ == "__main__":
-    app.run()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
