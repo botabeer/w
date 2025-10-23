@@ -66,18 +66,64 @@ def handle_message(event):
     if text == "مساعدة":
         bubble = {
             "type":"bubble",
-            "body":{"type":"box","layout":"vertical","contents":[
-                {"type":"text","text":"أوامر البوت","weight":"bold","size":"lg","wrap":True}
-            ]},
-            "footer":{"type":"box","layout":"horizontal","contents":[
-                {"type":"button","action":{"type":"postback","label":"امثله","data":"help_proverb"}},
-                {"type":"button","action":{"type":"postback","label":"لغز","data":"help_riddle"}}
-            ]}
+            "body":{
+                "type":"box",
+                "layout":"vertical",
+                "contents":[
+                    {"type":"text","text":"أوامر البوت","weight":"bold","size":"lg","wrap":True},
+                    {"type":"separator","margin":"md"}  # خط فاصل
+                ]
+            },
+            "footer":{
+                "type":"box",
+                "layout":"horizontal",
+                "contents":[
+                    {"type":"button","action":{"type":"postback","label":"امثله","data":"help_proverb"}},
+                    {"type":"button","action":{"type":"postback","label":"لغز","data":"help_riddle"}}
+                ]
+            }
         }
         line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="مساعدة", contents=bubble))
         return
 
-# --- Flex Buttons Postback ---
+    # --- أمر "امثله" يشتغل من الكتابة ---
+    if text == "امثله":
+        proverb = random.choice(emoji_proverbs)
+        sessions[source_id] = {"type":"proverb", "text":proverb["text"]}
+        emoji_text = split_text(proverb["emoji"])
+        bubble = {
+            "type": "bubble",
+            "body": {"type":"box","layout":"vertical","contents":[
+                {"type":"text","text":emoji_text,"weight":"bold","size":"lg","wrap":True},
+                {"type":"separator","margin":"md"}  # خط فاصل
+            ]},
+            "footer": {"type":"box","layout":"horizontal","contents":[
+                {"type":"button","action":{"type":"postback","label":"الإجابة","data":"show_proverb"}}
+            ]}
+        }
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="أمثال", contents=bubble))
+        return
+
+    # --- أمر "لغز" يشتغل من الكتابة ---
+    if text == "لغز":
+        riddle = random.choice(riddles)
+        sessions[source_id] = {"type":"riddle", "answer":riddle["answer"], "hint":riddle.get("hint","")}
+        riddle_text = split_text(riddle["question"])
+        bubble = {
+            "type":"bubble",
+            "body":{"type":"box","layout":"vertical","contents":[
+                {"type":"text","text":riddle_text,"weight":"bold","size":"lg","wrap":True},
+                {"type":"separator","margin":"md"}  # خط فاصل
+            ]},
+            "footer":{"type":"box","layout":"horizontal","contents":[
+                {"type":"button","action":{"type":"postback","label":"تلميح","data":"riddle_hint"}},
+                {"type":"button","action":{"type":"postback","label":"الإجابة","data":"show_riddle"}}
+            ]}
+        }
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="لغز", contents=bubble))
+        return
+
+# --- Postback Events ---
 @handler.add(PostbackEvent)
 def handle_postback(event):
     source_type = event.source.type
@@ -95,7 +141,8 @@ def handle_postback(event):
         bubble = {
             "type": "bubble",
             "body": {"type":"box","layout":"vertical","contents":[
-                {"type":"text","text":emoji_text,"weight":"bold","size":"lg","wrap":True}
+                {"type":"text","text":emoji_text,"weight":"bold","size":"lg","wrap":True},
+                {"type":"separator","margin":"md"}  # خط فاصل
             ]},
             "footer": {"type":"box","layout":"horizontal","contents":[
                 {"type":"button","action":{"type":"postback","label":"الإجابة","data":"show_proverb"}}
@@ -112,7 +159,8 @@ def handle_postback(event):
         bubble = {
             "type":"bubble",
             "body":{"type":"box","layout":"vertical","contents":[
-                {"type":"text","text":riddle_text,"weight":"bold","size":"lg","wrap":True}
+                {"type":"text","text":riddle_text,"weight":"bold","size":"lg","wrap":True},
+                {"type":"separator","margin":"md"}  # خط فاصل
             ]},
             "footer":{"type":"box","layout":"horizontal","contents":[
                 {"type":"button","action":{"type":"postback","label":"تلميح","data":"riddle_hint"}},
