@@ -19,6 +19,25 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 # --- جلسات لكل مصدر (فرد أو مجموعة) ---
 sessions = {}
 
+# --- دالة تقسيم النص الطويل ---
+def split_text(text, max_chars=50):
+    """تقسيم النص إلى أسطر إذا تجاوز الحد المحدد"""
+    words = text.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        if len(current_line) + len(word) + 1 > max_chars:
+            lines.append(current_line)
+            current_line = word
+        else:
+            if current_line:
+                current_line += " " + word
+            else:
+                current_line = word
+    if current_line:
+        lines.append(current_line)
+    return "\n".join(lines)
+
 # --- أمثال مصورة (20 مثال) ---
 emoji_proverbs = [
     {"emoji":"👊 😭🏃👄", "text":"ضربني وبكى، سبقني واشتكى"},
@@ -109,10 +128,11 @@ def handle_message(event):
     if text == "امثله":
         proverb = random.choice(emoji_proverbs)
         sessions[source_id] = {"type":"proverb", "text":proverb["text"]}
+        emoji_text = split_text(proverb["emoji"])
         bubble = {
             "type": "bubble",
             "body": {"type":"box","layout":"vertical","contents":[
-                {"type":"text","text":proverb["emoji"],"weight":"bold","size":"lg"}
+                {"type":"text","text":emoji_text,"weight":"bold","size":"lg","wrap":True}
             ]},
             "footer": {"type":"box","layout":"vertical","contents":[
                 {"type":"button","action":{"type":"postback","label":"اظهر المعنى","data":"show_proverb"}} 
@@ -125,10 +145,11 @@ def handle_message(event):
     if text == "لغز":
         riddle = random.choice(riddles)
         sessions[source_id] = {"type":"riddle", "answer":riddle["answer"]}
+        riddle_text = split_text(riddle["question"])
         bubble = {
             "type":"bubble",
             "body":{"type":"box","layout":"vertical","contents":[
-                {"type":"text","text":riddle["question"],"weight":"bold","size":"lg"}
+                {"type":"text","text":riddle_text,"weight":"bold","size":"lg","wrap":True}
             ]},
             "footer":{"type":"box","layout":"vertical","contents":[
                 {"type":"button","action":{"type":"postback","label":"اظهر الإجابة","data":"show_riddle"}} 
