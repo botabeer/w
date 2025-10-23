@@ -37,12 +37,13 @@ def split_text(text, max_chars=50):
         lines.append(current_line)
     return "\n".join(lines)
 
-# --- تحميل الألغاز والأمثال من ملفات JSON ---
+# --- قراءة الأمثال من الملف ---
+with open("proverbs.json", "r", encoding="utf-8") as f:
+    emoji_proverbs = json.load(f)
+
+# --- قراءة الألغاز من الملف ---
 with open("riddles.json", "r", encoding="utf-8") as f:
     riddles = json.load(f)
-
-with open("emoji_proverbs.json", "r", encoding="utf-8") as f:
-    emoji_proverbs = json.load(f)
 
 # --- Webhook ---
 @app.route("/callback", methods=["POST"])
@@ -64,10 +65,16 @@ def handle_message(event):
     source_type = event.source.type
     if source_type == "user":
         source_id = event.source.user_id
+        try:
+            display_name = line_bot_api.get_profile(source_id).display_name
+        except:
+            display_name = "صديق"
     elif source_type == "group":
         source_id = event.source.group_id
+        display_name = "المجموعة"
     elif source_type == "room":
         source_id = event.source.room_id
+        display_name = "الغرفة"
     else:
         return
 
@@ -76,7 +83,8 @@ def handle_message(event):
         reply = (
             "أوامر البوت:\n"
             "امثله → أمثال مصورة مع زر لإظهار المعنى\n"
-            "لغز → ألغاز مع زر لإظهار الإجابة"
+            "لغز → ألغاز مع زر لإظهار الإجابة\n"
+            "💡 في الأمثال والألغاز: اضغط على الزر لإظهار التلميح أولاً، ثم الإجابة."
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
@@ -85,7 +93,7 @@ def handle_message(event):
     if text == "امثله":
         proverb = random.choice(emoji_proverbs)
         sessions[source_id] = {"type":"proverb", "text":proverb["text"]}
-        emoji_text = split_text(proverb["emoji"])
+        emoji_text = split_text(proverb.get("emoji", ""))
         bubble = {
             "type": "bubble",
             "body": {"type":"box","layout":"vertical","contents":[
@@ -101,15 +109,15 @@ def handle_message(event):
     # --- ألغاز ---
     if text == "لغز":
         riddle = random.choice(riddles)
-        sessions[source_id] = {"type":"riddle", "answer":riddle["الإجابة"], "question": riddle["لغز"], "hint": riddle.get("تلميح","")}
-        riddle_text = split_text(riddle["لغز"])
+        sessions[source_id] = {"type":"riddle", "answer":riddle["answer"]}
+        riddle_text = split_text(riddle["question"])
         bubble = {
             "type":"bubble",
             "body":{"type":"box","layout":"vertical","contents":[
                 {"type":"text","text":riddle_text,"weight":"bold","size":"lg","wrap":True}
             ]},
             "footer":{"type":"box","layout":"vertical","contents":[
-                {"type":"button","action":{"type":"postback","label":"اظهر التلميح/الإجابة","data":"show_riddle"}} 
+                {"type":"button","action":{"type":"postback","label":"اظهر الإجابة","data":"show_riddle"}} 
             ]}
         }
         line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="لغز", contents=bubble))
@@ -132,10 +140,8 @@ def handle_postback(event):
     if source_id in sessions:
         session = sessions[source_id]
         if data == "show_riddle" and session.get("type")=="riddle":
-            hint = session.get("hint", "")
             answer = session["answer"]
-            reply_text = f"💡 تلميح: {hint}\n🔑 الإجابة: {answer}" if hint else f"🔑 الإجابة: {answer}"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 الإجابة: {answer}"))
         elif data == "show_proverb" and session.get("type")=="proverb":
             text = session["text"]
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 المعنى: {text}"))
