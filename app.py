@@ -2,7 +2,9 @@ import os, random, json
 from flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
+from linebot.models import (
+    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
+)
 
 app = Flask(__name__)
 
@@ -14,6 +16,9 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
+# --- جلسات لكل مصدر ---
+sessions = {}
+
 # --- تحميل البيانات ---
 with open("proverbs.json", "r", encoding="utf-8") as f:
     proverbs = json.load(f)
@@ -21,10 +26,7 @@ with open("proverbs.json", "r", encoding="utf-8") as f:
 with open("riddles.json", "r", encoding="utf-8") as f:
     riddles = json.load(f)
 
-# --- جلسات لكل مصدر ---
-sessions = {}
-
-# --- تقسيم النص ---
+# --- دالة تقسيم النص ---
 def split_text(text, max_chars=50):
     words = text.split()
     lines = []
@@ -34,7 +36,10 @@ def split_text(text, max_chars=50):
             lines.append(current_line)
             current_line = word
         else:
-            current_line = current_line + " " + word if current_line else word
+            if current_line:
+                current_line += " " + word
+            else:
+                current_line = word
     if current_line:
         lines.append(current_line)
     return "\n".join(lines)
@@ -59,74 +64,65 @@ def handle_message(event):
     source_type = event.source.type
     if source_type == "user":
         source_id = event.source.user_id
-        try:
-            display_name = line_bot_api.get_profile(source_id).display_name
-        except:
-            display_name = "صديق"
     elif source_type == "group":
         source_id = event.source.group_id
-        display_name = "المجموعة"
     elif source_type == "room":
         source_id = event.source.room_id
-        display_name = "الغرفة"
     else:
         return
 
     # --- مساعدة ---
     if text == "مساعدة":
-        reply = "أوامر البوت:\nامثله\nلغز"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        bubble = {
+            "type": "bubble",
+            "body": {"type": "box", "layout": "vertical","contents":[
+                {"type":"text","text":"أوامر البوت:\nامثله\nلغز","wrap":True,"weight":"bold","size":"md"}
+            ]},
+            "footer": {"type":"box","layout":"horizontal","contents":[
+                {"type":"button","action":{"type":"postback","label":"🔜","data":"help_next"}},
+                {"type":"button","action":{"type":"postback","label":"🔙","data":"help_prev"}}
+            ],
+            "justifyContent":"flex-start"}
+        }
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="مساعدة", contents=bubble))
         return
 
     # --- أمثال ---
     if text == "امثله":
-        index = random.randint(0, len(proverbs)-1)
-        sessions[source_id] = {"type":"proverb", "index":index}
-        show_proverb(event, source_id)
+        proverb = random.choice(proverbs)
+        sessions[source_id] = {"type":"proverb", "text":proverb["text"]}
+        bubble = {
+            "type":"bubble",
+            "body":{"type":"box","layout":"vertical","contents":[
+                {"type":"text","text":split_text(proverb["emoji"]),"weight":"bold","size":"lg","wrap":True}
+            ]},
+            "footer":{"type":"box","layout":"horizontal","contents":[
+                {"type":"button","action":{"type":"postback","label":"🔜","data":"proverb_next"}},
+                {"type":"button","action":{"type":"postback","label":"☑️","data":"proverb_show"}},
+                {"type":"button","action":{"type":"postback","label":"🔙","data":"proverb_prev"}}
+            ]}
+        }
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="أمثال", contents=bubble))
         return
 
     # --- ألغاز ---
     if text == "لغز":
-        index = random.randint(0, len(riddles)-1)
-        sessions[source_id] = {"type":"riddle", "index":index, "hint_shown":False}
-        show_riddle(event, source_id)
+        riddle = random.choice(riddles)
+        sessions[source_id] = {"type":"riddle", "question":riddle["question"], "answer":riddle["answer"]}
+        bubble = {
+            "type":"bubble",
+            "body":{"type":"box","layout":"vertical","contents":[
+                {"type":"text","text":split_text(riddle["question"]),"weight":"bold","size":"lg","wrap":True}
+            ]},
+            "footer":{"type":"box","layout":"horizontal","contents":[
+                {"type":"button","action":{"type":"postback","label":"🔜","data":"riddle_next"}},
+                {"type":"button","action":{"type":"postback","label":"💡","data":"riddle_hint"}},
+                {"type":"button","action":{"type":"postback","label":"☑️","data":"riddle_show"}},
+                {"type":"button","action":{"type":"postback","label":"🔙","data":"riddle_prev"}}
+            ]}
+        }
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="لغز", contents=bubble))
         return
-
-# --- أزرار Flex ---
-def show_proverb(event, source_id):
-    session = sessions[source_id]
-    proverb = proverbs[session["index"]]
-    emoji_text = split_text(proverb["emoji"])
-    bubble = {
-        "type":"bubble",
-        "body":{"type":"box","layout":"vertical","contents":[
-            {"type":"text","text":emoji_text,"weight":"bold","size":"lg","wrap":True}
-        ]},
-        "footer":{"type":"box","layout":"horizontal","contents":[
-            {"type":"button","action":{"type":"postback","label":"🔜","data":"prev_proverb"}},
-            {"type":"button","action":{"type":"postback","label":"☑️","data":"show_proverb"}},
-            {"type":"button","action":{"type":"postback","label":"🔙","data":"next_proverb"}}
-        ]}
-    }
-    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="أمثال", contents=bubble))
-
-def show_riddle(event, source_id):
-    session = sessions[source_id]
-    riddle = riddles[session["index"]]
-    riddle_text = split_text(riddle["question"])
-    bubble = {
-        "type":"bubble",
-        "body":{"type":"box","layout":"vertical","contents":[
-            {"type":"text","text":riddle_text,"weight":"bold","size":"lg","wrap":True}
-        ]},
-        "footer":{"type":"box","layout":"horizontal","contents":[
-            {"type":"button","action":{"type":"postback","label":"🔜","data":"prev_riddle"}},
-            {"type":"button","action":{"type":"postback","label":"💡","data":"hint_riddle"}},
-            {"type":"button","action":{"type":"postback","label":"☑️","data":"show_riddle"}},
-            {"type":"button","action":{"type":"postback","label":"🔙","data":"next_riddle"}}
-        ]}
-    }
-    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="ألغاز", contents=bubble))
 
 # --- الرد على أزرار Flex ---
 @handler.add(PostbackEvent)
@@ -141,37 +137,23 @@ def handle_postback(event):
     else:
         return
 
-    if source_id not in sessions:
-        return
-    session = sessions[source_id]
     data = event.postback.data
+    if source_id in sessions:
+        session = sessions[source_id]
 
-    if session["type"]=="proverb":
-        if data=="show_proverb":
-            proverb = proverbs[session["index"]]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 المعنى: {proverb['text']}"))
-        elif data=="prev_proverb":
-            session["index"] = (session["index"] - 1) % len(proverbs)
-            show_proverb(event, source_id)
-        elif data=="next_proverb":
-            session["index"] = (session["index"] + 1) % len(proverbs)
-            show_proverb(event, source_id)
+        # --- أمثال ---
+        if data == "proverb_show" and session.get("type")=="proverb":
+            text = session["text"]
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 المعنى: {text}"))
 
-    elif session["type"]=="riddle":
-        riddle = riddles[session["index"]]
-        if data=="hint_riddle":
-            session["hint_shown"] = True
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 التلميح: {riddle.get('hint','')}" ))
-        elif data=="show_riddle":
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"☑️ الإجابة: {riddle['answer']}"))
-        elif data=="prev_riddle":
-            session["index"] = (session["index"] - 1) % len(riddles)
-            session["hint_shown"] = False
-            show_riddle(event, source_id)
-        elif data=="next_riddle":
-            session["index"] = (session["index"] + 1) % len(riddles)
-            session["hint_shown"] = False
-            show_riddle(event, source_id)
+        # --- ألغاز ---
+        elif data == "riddle_show" and session.get("type")=="riddle":
+            answer = session["answer"]
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"☑️ الإجابة: {answer}"))
+        elif data == "riddle_hint" and session.get("type")=="riddle":
+            question = session["question"]
+            hint = question[:int(len(question)/2)] + "..."  # مثال للتلميح: نصف السؤال
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 التلميح: {hint}"))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
