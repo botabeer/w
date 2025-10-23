@@ -1,10 +1,8 @@
-import random, os, json
+import os, random, json
 from flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
-)
+from linebot.models import MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
 
 app = Flask(__name__)
 
@@ -16,7 +14,14 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# --- جلسات لكل مصدر (فرد أو مجموعة) ---
+# --- تحميل البيانات من الملفات ---
+with open("proverbs.json", "r", encoding="utf-8") as f:
+    emoji_proverbs = json.load(f)
+
+with open("riddles.json", "r", encoding="utf-8") as f:
+    riddles = json.load(f)
+
+# --- جلسات لكل مصدر ---
 sessions = {}
 
 # --- دالة تقسيم النص الطويل ---
@@ -29,21 +34,27 @@ def split_text(text, max_chars=50):
             lines.append(current_line)
             current_line = word
         else:
-            if current_line:
-                current_line += " " + word
-            else:
-                current_line = word
+            current_line = f"{current_line} {word}" if current_line else word
     if current_line:
         lines.append(current_line)
     return "\n".join(lines)
 
-# --- قراءة الأمثال من الملف ---
-with open("proverbs.json", "r", encoding="utf-8") as f:
-    emoji_proverbs = json.load(f)
-
-# --- قراءة الألغاز من الملف ---
-with open("riddles.json", "r", encoding="utf-8") as f:
-    riddles = json.load(f)
+# --- نافذة مساعدة ---
+def send_help(event):
+    bubble = {
+        "type": "bubble",
+        "body": {
+            "type":"box","layout":"vertical","contents":[
+                {"type":"text","text":"مساعدة البوت","weight":"bold","size":"xl","wrap":True,"align":"center","color":"#1A237E"},
+                {"type":"text","text":"💡 أمثال مصورة: أمثال مع زر لإظهار المعنى","wrap":True,"margin":"md"},
+                {"type":"button","style":"primary","action":{"type":"postback","label":"تجربة أمثال","data":"help_proverb"}},
+                {"type":"text","text":"🧩 ألغاز: ألغاز مع زر التلميح / الإجابة والسابق / التالي","wrap":True,"margin":"md"},
+                {"type":"button","style":"primary","action":{"type":"postback","label":"تجربة ألغاز","data":"help_riddle"}}
+            ]
+        },
+        "styles":{"body":{"backgroundColor":"#E8EAF6"}}
+    }
+    line_bot_api.reply_message(event.reply_token, FlexSendMessage("مساعدة", bubble))
 
 # --- Webhook ---
 @app.route("/callback", methods=["POST"])
@@ -80,20 +91,14 @@ def handle_message(event):
 
     # --- مساعدة ---
     if text == "مساعدة":
-        reply = (
-            "أوامر البوت:\n"
-            "امثله → أمثال مصورة مع زر لإظهار المعنى\n"
-            "لغز → ألغاز مع زر لإظهار الإجابة\n"
-            "💡 في الأمثال والألغاز: اضغط على الزر لإظهار التلميح أولاً، ثم الإجابة."
-        )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        send_help(event)
         return
 
     # --- أمثال مصورة ---
-    if text == "امثله":
+    if text in ["امثله","تجربة أمثال","help_proverb"]:
         proverb = random.choice(emoji_proverbs)
-        sessions[source_id] = {"type":"proverb", "text":proverb["text"]}
-        emoji_text = split_text(proverb.get("emoji", ""))
+        sessions[source_id] = {"type":"proverb","index":None,"data":proverb}
+        emoji_text = split_text(proverb["emoji"])
         bubble = {
             "type": "bubble",
             "body": {"type":"box","layout":"vertical","contents":[
@@ -103,24 +108,28 @@ def handle_message(event):
                 {"type":"button","action":{"type":"postback","label":"اظهر المعنى","data":"show_proverb"}} 
             ]}
         }
-        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="أمثال", contents=bubble))
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage("أمثال", bubble))
         return
 
     # --- ألغاز ---
-    if text == "لغز":
-        riddle = random.choice(riddles)
-        sessions[source_id] = {"type":"riddle", "answer":riddle["answer"]}
+    if text in ["لغز","تجربة ألغاز","help_riddle"]:
+        index = 0
+        riddle = riddles[index]
+        sessions[source_id] = {"type":"riddle","index":index}
         riddle_text = split_text(riddle["question"])
         bubble = {
             "type":"bubble",
             "body":{"type":"box","layout":"vertical","contents":[
                 {"type":"text","text":riddle_text,"weight":"bold","size":"lg","wrap":True}
             ]},
-            "footer":{"type":"box","layout":"vertical","contents":[
-                {"type":"button","action":{"type":"postback","label":"اظهر الإجابة","data":"show_riddle"}} 
+            "footer":{"type":"box","layout":"horizontal","contents":[
+                {"type":"button","action":{"type":"postback","label":"💡 تلميح","data":"hint"}},
+                {"type":"button","action":{"type":"postback","label":"الإجابة","data":"answer"}},
+                {"type":"button","action":{"type":"postback","label":"⏮️ السابق","data":"prev"}},
+                {"type":"button","action":{"type":"postback","label":"⏭️ التالي","data":"next"}}
             ]}
         }
-        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="لغز", contents=bubble))
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage("ألغاز", bubble))
         return
 
 # --- الرد على أزرار Flex ---
@@ -139,12 +148,42 @@ def handle_postback(event):
     data = event.postback.data
     if source_id in sessions:
         session = sessions[source_id]
-        if data == "show_riddle" and session.get("type")=="riddle":
-            answer = session["answer"]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 الإجابة: {answer}"))
-        elif data == "show_proverb" and session.get("type")=="proverb":
-            text = session["text"]
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 المعنى: {text}"))
+        if session.get("type")=="proverb" and data=="show_proverb":
+            proverb = session["data"]
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 المعنى: {proverb['text']}"))
+        elif session.get("type")=="riddle":
+            index = session["index"]
+            riddle = riddles[index]
+            if data=="hint":
+                hint = riddle.get("hint","💡 لا يوجد تلميح")
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{hint}"))
+            elif data=="answer":
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 الإجابة: {riddle['answer']}"))
+            elif data=="prev":
+                index = (index-1) % len(riddles)
+                session["index"] = index
+                riddle_text = split_text(riddles[index]["question"])
+                send_riddle_flex(event, riddle_text)
+            elif data=="next":
+                index = (index+1) % len(riddles)
+                session["index"] = index
+                riddle_text = split_text(riddles[index]["question"])
+                send_riddle_flex(event, riddle_text)
+
+def send_riddle_flex(event, riddle_text):
+    bubble = {
+        "type":"bubble",
+        "body":{"type":"box","layout":"vertical","contents":[
+            {"type":"text","text":riddle_text,"weight":"bold","size":"lg","wrap":True}
+        ]},
+        "footer":{"type":"box","layout":"horizontal","contents":[
+            {"type":"button","action":{"type":"postback","label":"💡 تلميح","data":"hint"}},
+            {"type":"button","action":{"type":"postback","label":"الإجابة","data":"answer"}},
+            {"type":"button","action":{"type":"postback","label":"⏮️ السابق","data":"prev"}},
+            {"type":"button","action":{"type":"postback","label":"⏭️ التالي","data":"next"}}
+        ]}
+    }
+    line_bot_api.reply_message(event.reply_token, FlexSendMessage("ألغاز", bubble))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
