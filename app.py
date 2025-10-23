@@ -38,6 +38,28 @@ def split_text(text, max_chars=50):
         lines.append(current_line)
     return "\n".join(lines)
 
+# --- دالة إنشاء Flex Message ---
+def make_flex_message(title, content, button_label, postback_data):
+    bubble = {
+        "type": "bubble",
+        "body": {
+            "type":"box",
+            "layout":"vertical",
+            "contents":[
+                {"type":"text", "text":split_text(title), "wrap":True, "weight":"bold", "size":"md"},
+                {"type":"text", "text":split_text(content), "wrap":True, "size":"sm", "margin":"md"}
+            ]
+        },
+        "footer": {
+            "type":"box",
+            "layout":"vertical",
+            "contents":[
+                {"type":"button", "action":{"type":"postback","label":button_label,"data":postback_data}}
+            ]
+        }
+    }
+    return FlexSendMessage(alt_text=title, contents=bubble)
+
 # --- أمثال مصورة (20 مثال) ---
 emoji_proverbs = [
     {"emoji":"👊 😭🏃👄", "text":"ضربني وبكى، سبقني واشتكى"},
@@ -128,34 +150,16 @@ def handle_message(event):
     if text == "امثله":
         proverb = random.choice(emoji_proverbs)
         sessions[source_id] = {"type":"proverb", "text":proverb["text"]}
-        emoji_text = split_text(proverb["emoji"])
-        bubble = {
-            "type": "bubble",
-            "body": {"type":"box","layout":"vertical","contents":[
-                {"type":"text","text":emoji_text,"weight":"bold","size":"lg","wrap":True}
-            ]},
-            "footer": {"type":"box","layout":"vertical","contents":[
-                {"type":"button","action":{"type":"postback","label":"اظهر المعنى","data":"show_proverb"}} 
-            ]}
-        }
-        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="أمثال", contents=bubble))
+        flex_msg = make_flex_message(proverb["emoji"], "", "اظهر المعنى", "show_proverb")
+        line_bot_api.reply_message(event.reply_token, flex_msg)
         return
 
     # --- ألغاز ---
     if text == "لغز":
         riddle = random.choice(riddles)
         sessions[source_id] = {"type":"riddle", "answer":riddle["answer"]}
-        riddle_text = split_text(riddle["question"])
-        bubble = {
-            "type":"bubble",
-            "body":{"type":"box","layout":"vertical","contents":[
-                {"type":"text","text":riddle_text,"weight":"bold","size":"lg","wrap":True}
-            ]},
-            "footer":{"type":"box","layout":"vertical","contents":[
-                {"type":"button","action":{"type":"postback","label":"اظهر الإجابة","data":"show_riddle"}} 
-            ]}
-        }
-        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="لغز", contents=bubble))
+        flex_msg = make_flex_message(riddle["question"], "", "اظهر الإجابة", "show_riddle")
+        line_bot_api.reply_message(event.reply_token, flex_msg)
         return
 
 # --- الرد على أزرار Flex ---
