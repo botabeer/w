@@ -1,10 +1,9 @@
-
-import random, json, os, typing
+import random, os, typing
 from flask import Flask, request
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent, PostbackAction
+    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
 )
 
 app = Flask(__name__)
@@ -17,60 +16,53 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-def load_file_lines(filename: str) -> typing.List[str]:
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            return [line.strip() for line in f if line.strip()]
-    except Exception:
-        return []
-
-def load_json_file(filename: str) -> dict:
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-questions = load_file_lines("questions.txt")
-challenges = load_file_lines("challenges.txt")
-confessions = load_file_lines("confessions.txt")
-personal_questions = load_file_lines("personality.txt")
-games_data = load_json_file("games.txt")
-game_weights = load_json_file("game_weights.json")
-personality_descriptions = load_json_file("characters.txt")
-
+# --- جلسات لكل مصدر (فرد أو مجموعة) ---
 sessions = {}
-general_indices = {"سؤال":0, "تحدي":0, "اعتراف":0, "شخصي":0}
 
-emoji_proverbs = {
-    "👊 😭🏃👄": "ضربني وبكى، سبقني واشتكى",
-    "👋💦👋🔥": "من يده في الماء ليس كالذي يده في النار",
-    "🐒👀👩": "القرد في عين أمه غزال",
-    "💤👑": "النوم سلطان",
-    "✈🐦👆✈👇": "الوقت كالسيف، إن لم تقطعه قطعك",
-    "📖💡👽🌊": "العلم نور والجهل ظلام",
-    "👄🐎✋👍😝👎": "لسانك حصانك، إن صنته صانك وإن خنته خانك",
-    "👋1⃣👏": "يد واحدة لا تصفق",
-    "🐧✊🐧🐧🐧🐧🌴": "عصفور في اليد خير من عشرة على الشجرة",
-    "🤝👬": "الصاحب ساحب"
-}
+# --- أمثال مصورة (20 مثال) ---
+emoji_proverbs = [
+    {"emoji":"👊 😭🏃👄", "text":"ضربني وبكى، سبقني واشتكى"},
+    {"emoji":"👋💦👋🔥", "text":"من يده في الماء ليس كالذي يده في النار"},
+    {"emoji":"🐒👀👩", "text":"القرد في عين أمه غزال"},
+    {"emoji":"💤👑", "text":"النوم سلطان"},
+    {"emoji":"✈🐦👆✈👇", "text":"الوقت كالسيف، إن لم تقطعه قطعك"},
+    {"emoji":"📖💡👽🌊", "text":"العلم نور والجهل ظلام"},
+    {"emoji":"👄🐎✋👍😝👎", "text":"لسانك حصانك، إن صنته صانك وإن خنته خانك"},
+    {"emoji":"👋1⃣👏", "text":"يد واحدة لا تصفق"},
+    {"emoji":"🐧✊🐧🐧🐧🐧🌴", "text":"عصفور في اليد خير من عشرة على الشجرة"},
+    {"emoji":"🤝👬", "text":"الصاحب ساحب"},
+    {"emoji":"🌟💪", "text":"العزم يصنع المعجزات"},
+    {"emoji":"🦁👑", "text":"القوة في الشجاعة"},
+    {"emoji":"🍎📚", "text":"التعليم مفتاح النجاح"},
+    {"emoji":"🌊🛶", "text":"من جد وجد"},
+    {"emoji":"🔥💨", "text":"الصبر مفتاح الفرج"},
+    {"emoji":"🎯🏆", "text":"التركيز يحقق الهدف"},
+    {"emoji":"🕊️✌️", "text":"السلام من شيم الكرام"},
+    {"emoji":"🌳🌱", "text":"من زرع حصد"},
+    {"emoji":"💎✨", "text":"القيمة في الجوهر لا في المظهر"},
+    {"emoji":"🗝️🚪", "text":"الفرص تأتي لمن يبحث عنها"}
+]
 
+# --- ألغاز (15 لغز) ---
 riddles = [
     {"question": "ما هو الشيء الذي كلما أخذت منه يكبر؟", "answer": "الحفرة"},
     {"question": "له أوراق وليس شجرة، له جلد وليس حيوان، ما هو؟", "answer": "الكتاب"},
     {"question": "ما هو الشيء الذي يتكلم جميع لغات العالم؟", "answer": "الصدى"},
-    {"question": "ما هو الشيء الذي يمشي بلا قدمين؟", "answer": "الزمن"}
+    {"question": "ما هو الشيء الذي يمشي بلا قدمين؟", "answer": "الزمن"},
+    {"question": "شيء يكون في السماء ويمطر على الأرض، ما هو؟", "answer": "السحاب"},
+    {"question": "أبيض في الثلج وأسود في الليل، ما هو؟", "answer": "الظل"},
+    {"question": "شيء له أسنان ولا يعض، ما هو؟", "answer": "المشط"},
+    {"question": "ما هو الشيء الذي يملأ الغرفة ولكنه لا يشغل حيزا؟", "answer": "الضوء"},
+    {"question": "ما هو الشيء الذي يكسر بمجرد ذكر اسمه؟", "answer": "الصمت"},
+    {"question": "له مدينة وليس له ناس، ما هو؟", "answer": "الخريطة"},
+    {"question": "شيء يُكتب ولا يُقرأ، ما هو؟", "answer": "القلم الفارغ"},
+    {"question": "ما هو الشيء الذي يركض ولا يمشي؟", "answer": "الماء"},
+    {"question": "له قلب ولا ينبض، ما هو؟", "answer": "الخس"},
+    {"question": "ما هو الشيء الذي كلما زاد نقص؟", "answer": "العمر"},
+    {"question": "شيء يسمع بلا أذن ويتكلم بلا لسان، ما هو؟", "answer": "الصدى"}
 ]
 
-def calculate_personality(user_answers: typing.List[int]) -> str:
-    scores = game_weights.copy()
-    for i, ans in enumerate(user_answers):
-        weight = games_data["game"][i]["answers"].get(str(ans), {}).get("weight", {})
-        for key, val in weight.items():
-            if key in scores:
-                scores[key] += val
-    return max(scores, key=scores.get)
-
+# --- Webhook ---
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature", "")
@@ -83,6 +75,7 @@ def callback():
         print(f"Webhook exception: {e}")
     return "OK", 200
 
+# --- التعامل مع الرسائل ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     text = event.message.text.strip()
@@ -102,44 +95,49 @@ def handle_message(event):
     else:
         return
 
-    arabic_to_english = {"١":"1","٢":"2","٣":"3","٤":"4"}
-    text_conv = arabic_to_english.get(text,text)
-
+    # --- مساعدة ---
     if text == "مساعدة":
         reply = (
             "أوامر البوت:\n"
-            "سؤال → سؤال عام\n"
-            "تحدي → تحدي\n"
-            "اعتراف → اعتراف\n"
-            "شخصي → سؤال شخصي\n"
-            "لعبه → لعبة الأسئلة\n"
-            "امثله → الأمثال المصورة\n"
-            "لغز → ألغاز\n"
+            "امثله → أمثال مصورة مع زر لإظهار المعنى\n"
+            "لغز → ألغاز مع زر لإظهار الإجابة"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
+    # --- أمثال مصورة ---
     if text == "امثله":
-        key, val = random.choice(list(emoji_proverbs.items()))
-        reply_text = f"{key}\n\n(اضغط 'مساعدة' لمعرفة المعنى)\n{val}"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        return
-
-    if text == "لغز":
-        riddle = random.choice(riddles)
-        sessions[source_id] = {"type":"riddle","answer":riddle["answer"]}
+        proverb = random.choice(emoji_proverbs)
+        sessions[source_id] = {"type":"proverb", "text":proverb["text"]}
         bubble = {
             "type": "bubble",
             "body": {"type":"box","layout":"vertical","contents":[
-                {"type":"text","text":riddle["question"],"wrap":True,"weight":"bold"}
+                {"type":"text","text":proverb["emoji"],"weight":"bold","size":"lg"}
             ]},
             "footer": {"type":"box","layout":"vertical","contents":[
-                {"type":"button","action":{"type":"postback","label":"اظهر الإجابة","data":"show_riddle_answer"}}
+                {"type":"button","action":{"type":"postback","label":"اظهر المعنى","data":"show_proverb"}} 
+            ]}
+        }
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="أمثال", contents=bubble))
+        return
+
+    # --- ألغاز ---
+    if text == "لغز":
+        riddle = random.choice(riddles)
+        sessions[source_id] = {"type":"riddle", "answer":riddle["answer"]}
+        bubble = {
+            "type":"bubble",
+            "body":{"type":"box","layout":"vertical","contents":[
+                {"type":"text","text":riddle["question"],"weight":"bold","size":"lg"}
+            ]},
+            "footer":{"type":"box","layout":"vertical","contents":[
+                {"type":"button","action":{"type":"postback","label":"اظهر الإجابة","data":"show_riddle"}} 
             ]}
         }
         line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="لغز", contents=bubble))
         return
 
+# --- الرد على أزرار Flex ---
 @handler.add(PostbackEvent)
 def handle_postback(event):
     source_type = event.source.type
@@ -153,9 +151,14 @@ def handle_postback(event):
         return
 
     data = event.postback.data
-    if data == "show_riddle_answer" and source_id in sessions and sessions[source_id].get("type")=="riddle":
-        answer = sessions[source_id]["answer"]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 الإجابة: {answer}"))
+    if source_id in sessions:
+        session = sessions[source_id]
+        if data == "show_riddle" and session.get("type")=="riddle":
+            answer = session["answer"]
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 الإجابة: {answer}"))
+        elif data == "show_proverb" and session.get("type")=="proverb":
+            text = session["text"]
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 المعنى: {text}"))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
